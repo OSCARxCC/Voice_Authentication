@@ -46,16 +46,16 @@ docker run -it -p 1883:1883 -v E:\Code\voice_auth\mosquitto_conf:/mosquitto/conf
 
 ```
 
-### 2. 執行 3 個不同終端機 (都要於Python虛擬環境執行!!)
+### 2. 於3 個不同終端機各別執行 (都要於Python虛擬環境執行!!)
 ```bash
 # Terminal 1：Server
-python server.py
+python3 server.py
 
 # Terminal 2：MITM 攔截者
-python mitm.py
+python3 mitm.py
 
 # Terminal 3：Client 傳送者
-python client.py
+python3 client.py
 ```
 ### 其他
 > `audio/test.wav` 為語音檔案，內容為：  
