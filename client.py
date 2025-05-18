@@ -20,11 +20,11 @@ def extract_info(text):
 def main():
     # 錄音轉文字
     text = transcribe("audio/test.wav")  # 假設你有錄音檔 audio.m4a
-    print("🎙️ 語音內容：", text)
+    print("語音內容：", text)
 
     # 擷取資訊
     name, phone, code = extract_info(text)
-    print(f"🧾 擷取資訊：姓名={name}, 電話={phone}, 代碼={code}")
+    print(f"擷取資訊：姓名={name}, 電話={phone}, 代碼={code}")
 
     # 加密後封裝成 JSON 並發送
     data = {
@@ -36,7 +36,7 @@ def main():
     client = mqtt.Client() 
     client.connect("localhost", 1883, 60)
     client.publish("secure/data", json.dumps(data))
-    print("✅ 已發送加密資料")
+    print("已發送加密資料!!")
 
 if __name__ == "__main__":
     main()
