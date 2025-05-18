@@ -67,7 +67,7 @@ python client.py
 ---
 
 
-## 優化
+## 待優化
 
-- 自訂 `audio/test.wav`（可用手機錄音）
+- 自訂 `audio/test.wav`（可用手機或電腦當場錄音demo）
 - 加入 GUI、Web 介面或流程圖以增加展示亮點
