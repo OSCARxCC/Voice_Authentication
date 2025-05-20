@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>語音驗證攻防模擬</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 2em; background-color: #f5f5f5; }
+    h1 { font-size: 28px; }
+    button { font-size: 18px; margin: 10px; padding: 10px 20px; }
+    audio { display: block; margin-top: 10px; }
+    textarea, pre { width: 100%; margin-top: 10px; font-size: 16px; background: #fff; padding: 10px; border: 1px solid #ccc; white-space: pre-wrap; }
+    label { font-size: 18px; margin-top: 20px; display: block; }
+  </style>
+</head>
+<body>
+  <h1>語音認證全流程顯示</h1>
+
+  <label><input type="checkbox" id="mitmToggle"> 啟用中間人攻擊 (MITM)</label>
+  <button onclick="simulateTest()">使用 test.wav 模擬測試</button>
+
+  <audio id="audioPlayer" controls src="/static/audio/test.mp3"></audio>
+
+  <textarea id="resultText" placeholder="語音轉文結果..."></textarea>
+
+  <h3>【🔹 Client 發送的密文】</h3>
+  <pre id="clientData">(等待中...)</pre>
+
+  <h3>【🔸 MITM 採集到的原始密文】</h3>
+  <pre id="mitmIntercept">(等待中...)</pre>
+
+  <h3>【🔹 MITM 修改後重送的密文】</h3>
+  <pre id="mitmTampered">(等待中...)</pre>
+
+  <h3>【🔸 Server 接收密文與驗證結果】</h3>
+  <pre id="serverResult">(等待中...)</pre>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script>
+    function simulateTest() {
+      const mitmEnabled = document.getElementById("mitmToggle").checked;
+      document.getElementById("audioPlayer").play();
+      fetch("/simulate", {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mitm: mitmEnabled })
+      })
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById("resultText").value = data.transcript || "(無法辨識語音)";
+      })
+      .catch(err => {
+        document.getElementById("resultText").value = "錯誤: " + err;
+      });
+    }
+
+    const socket = io(`http://${window.location.hostname}:5000`);
+
+    socket.on("message", (data) => {
+      const parsed = JSON.parse(data);
+      if (parsed.clientData) document.getElementById("clientData").textContent = JSON.stringify(parsed.clientData, null, 2);
+      if (parsed.mitmIntercept) document.getElementById("mitmIntercept").textContent = JSON.stringify(parsed.mitmIntercept, null, 2);
+      if (parsed.mitmTampered) document.getElementById("mitmTampered").textContent = JSON.stringify(parsed.mitmTampered, null, 2);
+      if (parsed.serverResult) document.getElementById("serverResult").textContent = JSON.stringify(parsed.serverResult, null, 2);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,254 @@
+# mqtt_voice_auth 專案主架構 - 初版
+
+# ==== 1. requirements.txt ====
+# whisper 語音辨識 + MQTT 通訊 + AES 加密
+
+whisper
+paho-mqtt
+pycryptodome
+uuid
+hashlib
+tk
+
+# ==== 2. utils/asr.py ====
+import whisper
+
+def transcribe(audio_path):
+    model = whisper.load_model("base")
+    result = model.transcribe(audio_path, language="zh")
+    return result["text"]
+
+# ==== 3. utils/crypto.py ====
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+import base64
+import hashlib
+import uuid
+
+def pad(text):
+    while len(text) % 16 != 0:
+        text += ' '
+    return text
+
+def checksum(data_str):
+    return hashlib.sha256(data_str.encode()).hexdigest()
+
+def encrypt(text, key):
+    cipher = AES.new(key, AES.MODE_EAX)
+    ciphertext, tag = cipher.encrypt_and_digest(pad(text).encode())
+    return {
+        "nonce": base64.b64encode(cipher.nonce).decode(),
+        "ciphertext": base64.b64encode(ciphertext).decode(),
+        "tag": base64.b64encode(tag).decode()
+    }
+
+def decrypt(enc_data, key):
+    nonce = base64.b64decode(enc_data['nonce'])
+    ciphertext = base64.b64decode(enc_data['ciphertext'])
+    tag = base64.b64decode(enc_data['tag'])
+    cipher = AES.new(key, AES.MODE_EAX, nonce=nonce)
+    plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+    return plaintext.decode().strip()
+
+# ==== 4. gui.py ====
+import tkinter as tk
+import subprocess
+import os
+
+def run_client():
+    subprocess.Popen(["python3", "client.py"])
+
+def run_server():
+    subprocess.Popen(["python3", "server.py"])
+
+def run_mitm():
+    subprocess.Popen(["python3", "mitm.py"])
+
+def open_log(folder):
+    path = os.path.abspath(folder)
+    os.startfile(path)
+
+root = tk.Tk()
+root.title("Voice Authentication Dashboard")
+root.geometry("800x600")
+
+font_big = ("Helvetica", 16)
+
+tk.Button(root, text="Run Client (Voice → Encrypt → Send)", font=font_big, command=run_client, height=2, width=40).pack(pady=10)
+tk.Button(root, text="Start Server (Decrypt & Verify)", font=font_big, command=run_server, height=2, width=40).pack(pady=10)
+tk.Button(root, text="Start MITM Interceptor", font=font_big, command=run_mitm, height=2, width=40).pack(pady=10)
+
+tk.Label(root, text="--- View Logs ---", font=("Helvetica", 14, "bold")).pack(pady=5)
+tk.Button(root, text="Open Server Logs", font=font_big, command=lambda: open_log("serverlogs"), width=30).pack(pady=5)
+tk.Button(root, text="Open MITM Logs", font=font_big, command=lambda: open_log("mitmlogs"), width=30).pack(pady=5)
+
+root.mainloop()
+
+
+# ==== 5. client.py ====
+import json
+import re
+import paho.mqtt.client as mqtt
+from utils.asr import transcribe
+from utils.crypto import encrypt, checksum
+import uuid
+
+def get_windows_host_ip():
+    with open("/etc/resolv.conf", "r") as f:
+        for line in f:
+            if "nameserver" in line:
+                return line.strip().split()[1]
+
+key = b'ThisIsASecretKey'
+
+def extract_info(text):
+    name_match = re.search(r"(我叫|我是)([\w\u4e00-\u9fa5]{2,4})", text)
+    phone_match = re.search(r"(09\d{8})", text)
+    code_match = re.search(r"(代碼|密碼)[是為:]?\s*(\d{4})", text)
+    name = name_match.group(2) if name_match else "未擷取"
+    phone = phone_match.group(1) if phone_match else "未擷取"
+    code = code_match.group(2) if code_match else "未擷取"
+    return name, phone, code
+
+text = transcribe("audio/test.wav")
+print("[辨識結果]", text)
+
+name, phone, code = extract_info(text)
+print("📦 擷取資訊：", name, phone, code)
+
+combined = name + phone + code
+data = {
+    "uuid": str(uuid.uuid4()),
+    "name": encrypt(name, key),
+    "phone": encrypt(phone, key),
+    "code": encrypt(code, key),
+    "checksum": checksum(combined)
+}
+
+client = mqtt.Client()
+client.connect(get_windows_host_ip(), 1883, 60)
+client.publish("secure/data", json.dumps(data))
+print("✅ 已發送加密資料，封包 UUID:", data["uuid"])
+
+# ==== 6. mitm.py ====
+import paho.mqtt.client as mqtt
+import json
+import base64
+import datetime
+import os
+
+def get_windows_host_ip():
+    with open("/etc/resolv.conf", "r") as f:
+        for line in f:
+            if "nameserver" in line:
+                return line.strip().split()[1]
+
+os.makedirs("mitmlogs", exist_ok=True)
+
+def log_to_file(original, modified=None):
+    with open("mitmlogs/mitm_log.json", "a", encoding="utf-8") as f:
+        entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "original": original
+        }
+        if modified:
+            entry["modified"] = modified
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+def on_message(client, userdata, msg):
+    payload = json.loads(msg.payload.decode())
+    packet_id = payload.get("uuid", "(未附UUID)")
+    print(f"⚠️ [MITM 攔截 UUID={packet_id}] 原始封包:", json.dumps(payload, ensure_ascii=False))
+
+    tamper = input("是否竄改代碼? (y/n): ")
+    modified = None
+    if tamper.lower() == 'y':
+        original_code = payload['code']['ciphertext']
+        payload['code']['ciphertext'] = base64.b64encode(b"0000HACKED").decode()
+        print("⚠️ 將封包 code.ciphertext 從", original_code, "改為", payload['code']['ciphertext'])
+        modified = payload
+
+    log_to_file(original=msg.payload.decode(), modified=modified)
+    mitm.publish("forward/data", json.dumps(payload))
+
+mitm = mqtt.Client()
+mitm.on_message = on_message
+mitm.connect(get_windows_host_ip(), 1883, 60)
+mitm.subscribe("secure/data")
+print("🧑‍💻 MITM 正在攔截資料...")
+mitm.loop_forever()
+
+
+# ==== 7. server.py ====
+import json
+import paho.mqtt.client as mqtt
+from utils.crypto import decrypt, checksum
+import datetime
+import os
+
+def get_windows_host_ip():
+    with open("/etc/resolv.conf", "r") as f:
+        for line in f:
+            if "nameserver" in line:
+                return line.strip().split()[1]
+
+os.makedirs("serverlogs", exist_ok=True)
+
+def log_server_verification(result, expected=None, actual=None, reason=None, uuid=None):
+    with open("serverlogs/server_log.json", "a", encoding="utf-8") as f:
+        entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "result": result
+        }
+        if uuid:
+            entry["uuid"] = uuid
+        if expected:
+            entry["expected"] = expected
+        if actual:
+            entry["actual"] = actual
+        if reason:
+            entry["reason"] = reason
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+key = b'ThisIsASecretKey'
+
+def on_message(client, userdata, msg):
+    payload = json.loads(msg.payload.decode())
+    with open("database.json", encoding='utf-8') as f:
+        db = json.load(f)
+    uuid_val = payload.get("uuid")
+    try:
+        name = decrypt(payload["name"], key)
+        phone = decrypt(payload["phone"], key)
+        code = decrypt(payload["code"], key)
+        combined = name + phone + code
+        local_checksum = checksum(combined)
+        incoming_checksum = payload.get("checksum")
+
+        print(f"[伺服器接收 UUID={uuid_val}] 解密結果: {name}, {phone}, {code}")
+
+        if local_checksum != incoming_checksum:
+            print("❌ 驗證失敗：checksum 不符")
+            log_server_verification("checksum 錯誤", uuid=uuid_val, expected=local_checksum, actual=incoming_checksum)
+            return
+
+        if name == db["name"] and phone == db["phone"] and code == db["code"]:
+            print("✅ 身份驗證成功")
+            log_server_verification("驗證成功", expected=db, actual={"name": name, "phone": phone, "code": code}, uuid=uuid_val)
+        else:
+            print("❌ 驗證失敗")
+            print("預期資料:", db)
+            print("實際資料:", {"name": name, "phone": phone, "code": code})
+            log_server_verification("驗證失敗", expected=db, actual={"name": name, "phone": phone, "code": code}, uuid=uuid_val)
+    except Exception as e:
+        print("❌ 解密失敗或資料被竄改:", e)
+        log_server_verification("解密錯誤", reason=str(e), uuid=uuid_val)
+
+server = mqtt.Client()
+server.on_message = on_message
+server.connect(get_windows_host_ip(), 1883, 60)
+server.subscribe("forward/data")
+print("📡 Server 正在等待資料...")
+server.loop_forever()
+
+

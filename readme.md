@@ -71,3 +71,22 @@ python3 client.py
 
 - 自訂 `audio/test.wav`（可用手機或電腦當場錄音demo）
 - 加入 GUI、Web 介面或流程圖以增加展示亮點
+
+
+
+## 安裝依賴套件
+```
+pip install flask flask-socketio eventlet whisper paho-mqtt
+
+```
+
+## 啟動順序
+開啟一個 Terminal，啟動 MQTT Broker（如 Mosquitto）
+
+開啟第二個 Terminal，執行 python mitm.py
+
+開啟第三個 Terminal，執行 python server.py
+
+開啟第四個 Terminal，執行 python app.py
+
+在瀏覽器開啟 http://localhost:5000
